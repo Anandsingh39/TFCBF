@@ -2,8 +2,10 @@
 # gcbfplus/env/sa_di_wrapper.py
 from __future__ import annotations
 import numpy as np
+import jax.numpy as jnp
 import jax.random as jr
 from typing import Dict, Tuple, Optional, Any
+from .double_integrator import DoubleIntegrator  # Proper relative import
 
 class SingleAgentDIEnv:
     """Black-box, single-agent wrapper around a GCBF+ DoubleIntegrator env.
@@ -159,10 +161,11 @@ class SingleAgentDIEnv:
         return s
     def set_state(self, state: np.ndarray):
         assert self._graph is not None, "reset() first"
-        state = np.asarray(state, dtype=np.float32).reshape(1, 4)
+        state = jnp.asarray(state, dtype=jnp.float32).reshape(1, 4)
         es = self._graph.env_states
         EnvStateT = type(es)
-        new_env_state = EnvStateT(agent=state, goal=np.array(es.goal, dtype=np.float32), obstacle=es.obstacle)
+        goal = jnp.asarray(es.goal, dtype=jnp.float32)
+        new_env_state = EnvStateT(agent=state, goal=goal, obstacle=es.obstacle)
         self._graph = self._env.get_graph(new_env_state)
     def clone(self) -> "SingleAgentDIEnv":
         new = SingleAgentDIEnv(self._env,
@@ -172,8 +175,8 @@ class SingleAgentDIEnv:
         assert self._graph is not None, "reset() first"
         es = self._graph.env_states
         EnvStateT = type(es)
-        agent = np.array(es.agent, dtype=np.float32)
-        goal  = np.array(es.goal,  dtype=np.float32)
+        agent = jnp.asarray(es.agent, dtype=jnp.float32)
+        goal  = jnp.asarray(es.goal,  dtype=jnp.float32)
         obstacle = es.obstacle
         new_env_state = EnvStateT(agent=agent, goal=goal, obstacle=obstacle)
         new._graph = self._env.get_graph(new_env_state)
@@ -181,19 +184,152 @@ class SingleAgentDIEnv:
         return new
 
     def is_geom_safe(self, state: Optional[np.ndarray] = None) -> bool:
+        """Check if state has zero collision cost (no agent-obstacle collision)."""
         if state is None:
             graph = self._graph
         else:
             es = self._graph.env_states
             EnvStateT = type(es)
-            agent = np.asarray(state, dtype=np.float32).reshape(1,4)
-            goal  = np.array(es.goal, dtype=np.float32)
+            agent = jnp.asarray(state, dtype=jnp.float32).reshape(1,4)
+            goal  = jnp.asarray(es.goal, dtype=jnp.float32)
             obstacle = es.obstacle
             graph = self._env.get_graph(EnvStateT(agent=agent, goal=goal, obstacle=obstacle))
         cost = float(np.array(self._env.get_cost(graph)))
         return cost == 0.0
 
+    def _graph_from_agent_state(self, state: np.ndarray):
+        assert self._graph is not None, "reset() first"
+        es = self._graph.env_states
+        EnvStateT = type(es)
+        agent = jnp.asarray(state, dtype=jnp.float32).reshape(1, 4)
+        goal = jnp.asarray(es.goal, dtype=jnp.float32)
+        obstacle = es.obstacle
+        env_state = EnvStateT(agent=agent, goal=goal, obstacle=obstacle)
+        return self._env.get_graph(env_state)
+
+    def _graph_for_state(self, state: Optional[np.ndarray]):
+        if state is None:
+            assert self._graph is not None, "reset() first"
+            return self._graph
+        return self._graph_from_agent_state(state)
+
+    # ========== DoubleIntegrator Safety Mask Functions ==========
+    
+    def safe_mask(self, state: Optional[np.ndarray] = None) -> bool:
+        """
+        Check if agent is in a SAFE state using DoubleIntegrator's safe_mask logic.
+        
+        Safe means:
+        - Agent maintains clearance of 2*car_radius from all obstacles
+        - (For multi-agent: also 4*car_radius from other agents, but N/A here)
+        
+        Args:
+            state: Optional state [4] to check. If None, uses current state.
+            
+        Returns:
+            bool: True if agent is safe, False otherwise
+        """
+        graph = self._graph_for_state(state)
+        # Call the DoubleIntegrator's safe_mask method
+        mask = self._env.safe_mask(graph)
+        return bool(np.array(mask)[0])  # Extract single agent's result
+    
+    def nominal_action(self, state: Optional[np.ndarray] = None) -> np.ndarray:
+        """Return the nominal LQR action u_ref used by the inner DoubleIntegrator."""
+        assert self._graph is not None, "reset() first"
+        graph = self._graph_for_state(state)
+        action = np.asarray(self._env.u_ref(graph), dtype=np.float32)
+        return action.reshape(-1)
+
+    def unsafe_mask(self, state: Optional[np.ndarray] = None) -> bool:
+        """
+        Check if agent is in an UNSAFE state using DoubleIntegrator's unsafe_mask logic.
+        
+        Unsafe means EITHER:
+        1. Currently colliding with obstacle
+        2. Heading toward obstacle within danger cone (predictive)
+        
+        This uses the LiDAR-based heading detection explained in detail in the code.
+        
+        Args:
+            state: Optional state [4] to check. If None, uses current state.
+            
+        Returns:
+            bool: True if agent is unsafe, False otherwise
+        """
+        graph = self._graph_for_state(state)
+        # Call the DoubleIntegrator's unsafe_mask method
+        mask = self._env.unsafe_mask(graph)
+        return bool(np.array(mask)[0])  # Extract single agent's result
+    
+    def collision_mask(self, state: Optional[np.ndarray] = None) -> bool:
+        """
+        Check if agent is currently in COLLISION using DoubleIntegrator's collision_mask logic.
+        
+        Collision means:
+        - Agent center is within car_radius of obstacle boundary (physically touching)
+        - (For multi-agent: or within 2*car_radius of another agent, but N/A here)
+        
+        Args:
+            state: Optional state [4] to check. If None, uses current state.
+            
+        Returns:
+            bool: True if agent is in collision, False otherwise
+        """
+        graph = self._graph_for_state(state)
+        # Call the DoubleIntegrator's collision_mask method
+        mask = self._env.collision_mask(graph)
+        return bool(np.array(mask)[0])  # Extract single agent's result
+    
+    def finish_mask(self, state: Optional[np.ndarray] = None) -> bool:
+        """
+        Check if agent has reached its goal using DoubleIntegrator's finish_mask logic.
+        
+        Goal reached means:
+        - Distance from agent to goal < 2*car_radius
+        
+        Args:
+            state: Optional state [4] to check. If None, uses current state.
+            
+        Returns:
+            bool: True if goal reached, False otherwise
+        """
+        graph = self._graph_for_state(state)
+        # Call the DoubleIntegrator's finish_mask method
+        mask = self._env.finish_mask(graph)
+        return bool(np.array(mask)[0])  # Extract single agent's result
+    
+    def get_cost(self, state: Optional[np.ndarray] = None) -> float:
+        """
+        Get collision cost using DoubleIntegrator's get_cost method.
+        
+        Cost is:
+        - 0.0 if no collision
+        - > 0.0 if collision (fraction of agents in collision, so 1.0 for single agent)
+        
+        Args:
+            state: Optional state [4] to check. If None, uses current state.
+            
+        Returns:
+            float: Collision cost value
+        """
+        graph = self._graph_for_state(state)
+        # Call the DoubleIntegrator's get_cost method
+        cost = self._env.get_cost(graph)
+        return float(np.array(cost))
+
     def rollout_sequence(self, actions: np.ndarray, early_stop_on_violation: bool = False):
+        """Roll out a sequence from the *current* state on a cloned simulator.
+        
+        Args:
+            actions: Action sequence [H, 2] or [2] for single action
+            early_stop_on_violation: If True, stop when collision or done occurs
+            
+        Returns:
+            states: np.ndarray [H+1, 4] - state trajectory
+            rewards: np.ndarray [H] - rewards at each step
+            infos: list of dicts - info at each step (includes safety masks)
+        """
         sim = self.clone()
         actions = np.asarray(actions, dtype=np.float32)
         if actions.ndim == 1:
@@ -210,6 +346,76 @@ class SingleAgentDIEnv:
             if early_stop_on_violation and (io or info.get('done', False)):
                 break
         return np.stack(states, axis=0), np.array(rewards, dtype=np.float32), infos
+
+    # ========== Trajectory Safety Analysis ==========
+    
+    def check_trajectory_safety(self, states: np.ndarray, 
+                               check_type: str = "unsafe") -> np.ndarray:
+        """
+        Check safety masks for a trajectory of states.
+        
+        Args:
+            states: State trajectory [T, 4] where each row is [x, y, vx, vy]
+            check_type: Type of check - "safe", "unsafe", "collision", or "finish"
+            
+        Returns:
+            np.ndarray [T]: Boolean array where True indicates the condition holds
+        """
+        states = np.asarray(states, dtype=np.float32)
+        if states.ndim == 1:
+            states = states[None, :]  # Single state -> [1, 4]
+        
+        check_func = {
+            "safe": self.safe_mask,
+            "unsafe": self.unsafe_mask,
+            "collision": self.collision_mask,
+            "finish": self.finish_mask,
+        }.get(check_type)
+        
+        if check_func is None:
+            raise ValueError(f"Invalid check_type: {check_type}. Must be one of: safe, unsafe, collision, finish")
+        
+        results = []
+        for state in states:
+            results.append(check_func(state))
+        
+        return np.array(results, dtype=bool)
+    
+    def is_trajectory_safe(self, states: np.ndarray, tolerance: str = "strict") -> bool:
+        """
+        Check if entire trajectory is safe.
+        
+        Args:
+            states: State trajectory [T, 4]
+            tolerance: "strict" (all must be safe) or "collision_free" (no collisions only)
+            
+        Returns:
+            bool: True if trajectory satisfies safety requirement
+        """
+        if tolerance == "strict":
+            # All states must be safe (no states in unsafe mask)
+            unsafe_flags = self.check_trajectory_safety(states, "unsafe")
+            return not np.any(unsafe_flags)
+        elif tolerance == "collision_free":
+            # No actual collisions (but predictive unsafe allowed)
+            collision_flags = self.check_trajectory_safety(states, "collision")
+            return not np.any(collision_flags)
+        else:
+            raise ValueError(f"Invalid tolerance: {tolerance}. Must be 'strict' or 'collision_free'")
+    
+    def get_first_unsafe_index(self, states: np.ndarray) -> Optional[int]:
+        """
+        Find the first timestep where trajectory becomes unsafe.
+        
+        Args:
+            states: State trajectory [T, 4]
+            
+        Returns:
+            int or None: Index of first unsafe state, or None if all safe
+        """
+        unsafe_flags = self.check_trajectory_safety(states, "unsafe")
+        unsafe_indices = np.where(unsafe_flags)[0]
+        return int(unsafe_indices[0]) if len(unsafe_indices) > 0 else None
 
     # Model-input convenience
     def feature_vector(self, obs: Optional[Dict[str, np.ndarray]] = None,

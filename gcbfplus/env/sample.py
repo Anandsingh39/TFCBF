@@ -46,7 +46,7 @@ def main(seed=0, steps=2000, include_velocity=True):
         env_id="double_integrator",
         num_agents=1,
         area_size=4.0,
-        num_obs=16,   # ← four rectangles
+        num_obs=4,   # ← four rectangles
         n_rays=32,
     )
     env = SingleAgentDIEnv(
