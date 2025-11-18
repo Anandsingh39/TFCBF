@@ -27,28 +27,73 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--area-size", type=float, default=6.0, help="Environment square size")
     parser.add_argument("--dt", type=float, default=0.03, help="Simulation time step")
     parser.add_argument("--max-travel", type=float, default=None, help="Maximum travel distance for targets")
-    parser.add_argument("--perturb-prob", type=float, default=0.2,
-                        help="Probability of adding exploratory noise to the nominal action")
-    parser.add_argument("--perturb-scale", type=float, default=0.1,
-                        help="Std-dev of Gaussian noise added to the nominal action when perturbing")
-    parser.add_argument("--normalize-lidar", action="store_true", default=True,
-                        help="Store LiDAR distances normalized by comm radius")
-    parser.add_argument("--no-normalize-lidar", dest="normalize_lidar", action="store_false",
-                        help="Disable LiDAR normalization")
-    parser.add_argument("--full-obs", nargs="*", default=["state_goal", "lidar"],
-                        help="Keys to concatenate for obs['full_obs']")
-    parser.add_argument("--mode-excitation", action="store_true",
-                        help="Cycle additive actions through all sign quadrants (++,+-,-+,--)")
-    parser.add_argument("--excitation-interval", type=int, default=8,
-                        help="Steps between forced excitation injections when enabled")
-    parser.add_argument("--excitation-scale", type=float, default=0.5,
-                        help="Fraction of action range used for mode excitation deltas")
-    parser.add_argument("--n-obs", type=int, default=None,
-                        help="Override number of rectangular obstacles (None keeps env default)")
-    parser.add_argument("--obs-len-min", type=float, default=None,
-                        help="Override minimum obstacle side length")
-    parser.add_argument("--obs-len-max", type=float, default=None,
-                        help="Override maximum obstacle side length")
+    parser.add_argument(
+        "--perturb-prob",
+        type=float,
+        default=0.2,
+        help="Probability of adding exploratory noise to the nominal action",
+    )
+    parser.add_argument(
+        "--perturb-scale",
+        type=float,
+        default=0.1,
+        help="Std-dev of Gaussian noise added to the nominal action when perturbing",
+    )
+    parser.add_argument(
+        "--normalize-lidar",
+        action="store_true",
+        default=True,
+        help="Store LiDAR distances normalized by comm radius",
+    )
+    parser.add_argument(
+        "--no-normalize-lidar",
+        dest="normalize_lidar",
+        action="store_false",
+        help="Disable LiDAR normalization",
+    )
+    parser.add_argument(
+        "--full-obs",
+        nargs="*",
+        default=["state_goal", "lidar"],
+        help="Keys to concatenate for obs['full_obs']",
+    )
+    parser.add_argument(
+        "--mode-excitation",
+        action="store_true",
+        help="Cycle additive actions through all sign quadrants (++,+-,-+,--)",
+    )
+    parser.add_argument(
+        "--excitation-interval",
+        type=int,
+        default=8,
+        help="Steps between forced excitation injections when enabled",
+    )
+    parser.add_argument(
+        "--excitation-scale",
+        type=float,
+        default=0.5,
+        help="Fraction of action range used for mode excitation deltas",
+    )
+    parser.add_argument(
+        "--n-obs",
+        "--n_obs",
+        dest="n_obs",
+        type=int,
+        default=None,
+        help="Override number of rectangular obstacles (None keeps env default)",
+    )  # Accept --n_obs to match user invocation preference.
+    parser.add_argument(
+        "--obs-len-min",
+        type=float,
+        default=None,
+        help="Override minimum obstacle side length",
+    )
+    parser.add_argument(
+        "--obs-len-max",
+        type=float,
+        default=None,
+        help="Override maximum obstacle side length",
+    )
     return parser.parse_args()
 
 

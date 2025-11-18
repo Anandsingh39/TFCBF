@@ -31,8 +31,8 @@ def make_env(
         num_agents: int,
         area_size: float = None,
         max_step: int = None,
+        num_obs: int = None,
         max_travel: Optional[float] = None,
-        num_obs: Optional[int] = None,
         n_rays: Optional[int] = None,
 ) -> MultiAgentEnv:
     assert env_id in ENV.keys(), f'Environment {env_id} not implemented.'
