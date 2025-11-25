@@ -49,7 +49,7 @@ class DoubleIntegrator(MultiAgentEnv):
         "comm_radius": 0.5,        # Communication/sensing radius for agent interactions
         "n_rays": 32,              # Number of LiDAR rays per agent
         "obs_len_range": [0.1, 0.5],  # Range of obstacle dimensions [min, max]
-        "n_obs": 4,                # Number of randomly generated obstacles
+        "n_obs": 16,                # Number of randomly generated obstacles
         "m": 0.1,                  # Mass of each agent (kg)
     }
 
@@ -181,7 +181,8 @@ class DoubleIntegrator(MultiAgentEnv):
 
         # Package into environment state
         env_states = self.EnvState(states, goals, obstacles)
-
+        #print("Reset EnvState:", env_states)
+        
         # Convert to graph representation
         return self.get_graph(env_states)
 
@@ -332,7 +333,7 @@ class DoubleIntegrator(MultiAgentEnv):
 
         # Package next state (goals and obstacles remain static)
         next_state = self.EnvState(next_agent_states, goal_states, obstacles)
-
+       # print("Next EnvState:", next_state)
         # Optional: include diagnostic information for evaluation
         info = {}
         if get_eval_info:

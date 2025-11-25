@@ -1,5 +1,6 @@
 
 import os
+import sys
 import numpy as np
 import torch
 import torch.nn as nn
@@ -58,6 +59,7 @@ def build_pact_model(state_dim=38, action_dim=2, ctx_tokens=16,
     }
 
     model = PACTBase(gpt_config=gpt_config, input_config=input_config)
+
     return model
 
 # ------------------------------
@@ -81,9 +83,9 @@ class CriticHead(nn.Module):
     def __init__(self, d_model: int, out_dim: int = 1):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(d_model, 256), nn.GELU(),
-            nn.Linear(256, 256), nn.GELU(),
-            nn.Linear(256, out_dim),
+            nn.Linear(d_model, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256, out_dim), nn.Tanh()
         )
 
     def forward(self, action_emb_last):  # (B, d)
@@ -131,7 +133,6 @@ class PACTWindowDataset(Dataset):
 
         self.states = np.stack([states_all[ep_ids == e] for e in self.episodes], axis=0)   # (E, L, S)
         self.actions = np.stack([actions_all[ep_ids == e] for e in self.episodes], axis=0) # (E, L, A) or (E, L)
-
         # map indices
         self.index = [(ei, t) for ei in range(len(self.episodes)) for t in range(self.L)]
 
